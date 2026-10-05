@@ -1,0 +1,46 @@
+{
+  "backend": "esp32s3-scalar-cpu",
+  "model_bytes": 6076240,
+  "workspace_bytes": 1594676,
+  "image_crc32": 1921932375,
+  "load_ms": 2707.623,
+  "prefill_ms": 5534.806,
+  "decode_ms": 9192.922,
+  "decode_steps": 7,
+  "minimum_free_psram_bytes": 6780520,
+  "generated_ids": [
+    561,
+    373,
+    514,
+    455,
+    953,
+    229,
+    698,
+    1060
+  ],
+  "prompt_ids": [
+    4,
+    100,
+    200,
+    300,
+    3
+  ],
+  "context": 128,
+  "cpu_mhz": 240,
+  "decode_tokens_per_second": 0.761455389265785,
+  "inference_compute_ms": 14727.728,
+  "host_greedy_ids_match": true,
+  "measurement": "single run; synthetic five-token prefix; scalar CPU backend",
+  "model_sha256": "996b6a854a1a0161f7180a086cbf4bc0e404b0c442c043aae1c15751c4268d93",
+  "firmware_sha256": "6a49fbe0ed17ad35ce6cbfd594e59e2ab124b24721937c00442b53adaf77989f",
+  "model_config": {
+    "vocab_size": 3021,
+    "d_model": 256,
+    "n_layers": 11,
+    "n_heads": 4,
+    "n_kv_heads": 2,
+    "head_dim": 64,
+    "d_ff": 1024
+  },
+  "idf_version": "5.5.4"
+}

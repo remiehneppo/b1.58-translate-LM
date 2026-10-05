@@ -1,0 +1,28 @@
+# Local environments, indexes and editor state
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.codegraph/
+.cache/
+.vscode/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Generated datasets and tokenizer corpora
+/dataset/
+*.jsonl
+/corpus_tokenizer.txt
+/ru_vi_tokenizer_8k/
+
+# Training/deployment artifacts stay local
+*.pt
+*.pth
+*.bin
+*.elf
+*.map
+/build/
+/dist/

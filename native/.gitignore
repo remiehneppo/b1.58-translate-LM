@@ -1,0 +1,5 @@
+/build*/
+/artifacts/
+/esp32/sdkconfig
+/esp32/sdkconfig.old
+/esp32/build/

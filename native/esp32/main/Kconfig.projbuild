@@ -1,0 +1,13 @@
+menu "RuVi research inference"
+config RUVI_CONTEXT
+    int "Workspace context capacity"
+    range 8 512
+    default 128
+config RUVI_MAX_NEW
+    int "Maximum generated tokens"
+    range 1 128
+    default 8
+config RUVI_PROMPT
+    string "Comma-separated prefix token IDs (including language tag and separator)"
+    default "4,100,200,300,3"
+endmenu

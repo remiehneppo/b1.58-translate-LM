@@ -1,0 +1,33 @@
+topic: "Tối ưu kiến trúc, huấn luyện và suy luận edge của mô hình dịch Vi–Ru BitNet b1.58 10M"
+scope:
+  include: ["kiến trúc", "STE và mục tiêu huấn luyện", "Prefix-LM và GQA", "xuất trọng số tam phân", "runtime edge", "kiểm định và benchmark"]
+  exclude: ["chất lượng dữ liệu", "tokenizer", "corpus demo"]
+  time_range: unlimited
+items:
+  - id: bitlinear
+    name: "BitLinear b1.58: STE, scale trọng số/kích hoạt, ổn định số và parity sau xuất"
+  - id: prefix_lm
+    name: "Prefix-LM, Continuous RoPE: mask tiền tố, padding, đối chiếu full-forward/cached decode"
+  - id: gqa_kv
+    name: "GQA, KV-cache: nhân bản K/V, cấp phát, tốc độ prefill và decode"
+  - id: squared_relu
+    name: "Squared ReLU FFN: chi phí và outlier; tôn trọng ADR-0001"
+  - id: sandwich_precision
+    name: "Sandwich Precision và Tied Embeddings: chi phí FP, độ nhạy chất lượng; tôn trọng ADR-0003/0004"
+  - id: training
+    name: "Huấn luyện: CE, sequence-level KD so với nhánh token-KL, scheduler và chọn checkpoint"
+  - id: quantized_artifact
+    name: "Artifact tam phân: pack 2-bit, scale, round-trip, hợp đồng định dạng và nạp an toàn"
+  - id: edge_runtime
+    name: "Runtime edge: kernel tính trực tiếp từ trọng số nén, bộ nhớ tĩnh/động, tốc độ theo pha"
+  - id: validation
+    name: "Kiểm định: parity, chất lượng dịch hai chiều, giới hạn ngữ cảnh, độ trễ và năng lượng"
+execution:
+  batch_size: 1
+  items_per_agent: 2
+  output_dir: ./results
+sources:
+  - https://arxiv.org/abs/2402.17764
+  - https://aclanthology.org/2025.acl-long.457/
+  - https://aclanthology.org/2023.emnlp-main.298/
+  - https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html

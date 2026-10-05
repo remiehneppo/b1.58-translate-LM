@@ -1,0 +1,23 @@
+categories:
+  - name: correctness
+    fields:
+      - {name: code_evidence, description: "Đường dẫn/dòng mã và hành vi kiểm chứng được", detail_level: detailed}
+      - {name: failure_modes, description: "Mask/padding, NaN, overflow, EOS và giới hạn ngữ cảnh", detail_level: detailed}
+      - {name: parity_oracle, description: "So sánh forward, export và runtime theo logits/tokens với sai số công bố", detail_level: detailed}
+  - name: architecture
+    fields:
+      - {name: domain_fit, description: "Liên hệ Prefix-LM, BitLinear, GQA, Sandwich Precision và ADR hiện hành", detail_level: moderate}
+      - {name: training_objective, description: "Khớp giữa sequence-level KD, CE và nhánh token-KL", detail_level: detailed}
+      - {name: numerical_precision, description: "FP/INT8 theo từng phép toán và độ nhạy outlier", detail_level: moderate}
+  - name: edge_deployment
+    fields:
+      - {name: target_platform, description: "CPU ISA, RAM/cache, hệ điều hành, luồng và mức điện năng", detail_level: detailed}
+      - {name: artifact_contract, description: "Phiên bản format, packing, scale, shape, kiểm tra nạp an toàn", detail_level: detailed}
+      - {name: memory_budget, description: "Dung lượng weights/scales, KV-cache, scratch, peak RSS và kích thước file", detail_level: detailed}
+      - {name: phase_latency, description: "Prefill, first-token, decode, P50/P95 toàn câu và năng lượng", detail_level: detailed}
+  - name: decisions
+    fields:
+      - {name: expected_impact, description: "Ảnh hưởng giả định lên chất lượng, độ trễ và bộ nhớ", detail_level: moderate}
+      - {name: effort_and_gate, description: "Độ khó, baseline đối chứng, ngưỡng cải thiện và tương thích ADR", detail_level: moderate}
+      - {name: source_transferability, description: "Nguồn, ngày, quy mô và phần nào chỉ là giả thuyết với model 10M", detail_level: moderate}
+uncertain: []
