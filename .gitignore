@@ -15,7 +15,7 @@ __pycache__/
 # Generated datasets and tokenizer corpora
 /dataset/
 *.jsonl
-/corpus_tokenizer.txt
+corpus_tokenizer.txt
 /ru_vi_tokenizer_8k/
 
 # Training/deployment artifacts stay local

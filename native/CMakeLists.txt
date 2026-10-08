@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(ruvi_native LANGUAGES CXX)
-add_library(ruvi STATIC ruvi.cpp)
+add_library(ruvi STATIC ruvi.cpp parallel.cpp tokenizer.cpp tokenizer_data.cpp kernels/kernel.cpp kernels/kernel_s3.cpp)
 target_include_directories(ruvi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ruvi PUBLIC cxx_std_17)
 target_compile_options(ruvi PRIVATE -O3 -Wall -Wextra -Wpedantic -ffp-contract=off)

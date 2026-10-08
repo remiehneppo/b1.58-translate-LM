@@ -16,6 +16,31 @@ Tokenizer/dataset không thay đổi. Runtime native nhận **prefix token IDs**
 **generated token IDs**; tokenize/decode văn bản hiện dùng tokenizer Python trên host.
 Đây là kiểm chứng model inference, chưa phải ứng dụng dịch văn bản standalone trên MCU.
 
+## Kiến trúc Kernel & Tối ưu hóa trên ESP32-S3
+
+Hệ thống bổ sung module `native/kernels/` với kiến trúc 3 tầng:
+
+1. **Portable Tiled Kernel (`ruvi::kernels::run`)**:
+   - Giải nén trọng số tam phân 2-bit (RUVI0001: continuous bit stream, `00=-1`, `01=0`, `10=+1`) thành vector `int8_t` trong buffer SRAM tạm theo từng tile hàng (`tile_rows` = 8, 16, hoặc 32).
+   - Tối ưu hóa giải nén bằng bảng tra cứu 256 phần tử (`s_unpack_lut`), xử lý 4 trọng số trong 1 thao tác đọc/ghi 32-bit khi hàng bắt đầu tại ranh giới byte, và fallback bitwise chính xác cho các ranh giới lệch.
+   - Tránh giải nén lại nhiều lần: một tile trọng số giải nén được dùng chung cho toàn bộ token trong batch prefill.
+
+2. **ESP32-S3 128-bit EE SIMD Assembly (`ruvi_kernel_s3_dot_raw`)**:
+   - Sử dụng tập lệnh mở rộng Energy-Efficient (EE) 128-bit của Xtensa LX7 (`ee.vld.128.ip`, `ee.vmulas.s8.accx`).
+   - Xoay vòng thanh ghi 4x qua 8 thanh ghi vector `q0..q7` (64 phần tử / vòng lặp) để triệt tiêu độ trễ load-to-use.
+   - Tuyệt đối không dùng `loop`/`loopnez` để tránh ghi đè thanh ghi vòng lặp phần cứng của GCC; sử dụng vòng lặp rẽ nhánh phần mềm `addi` + `bnez`.
+   - Căn chỉnh địa chỉ 16-byte nghiêm ngặt với padding số 0 ở đuôi hàng (`padded_k = (K + 15) & ~15`), không cần vòng lặp scalar xử lý phần dư.
+
+3. **Phân tầng Bộ nhớ (Memory Tiering)**:
+   - **Flash XIP**: Trọng số mô hình giữ nguyên trên Flash SPI, ánh xạ trực tiếp vào CPU address space qua `esp_partition_mmap`. Không sao chép toàn bộ model vào RAM.
+   - **Internal SRAM**: Cấp phát buffer tile (`tile_scratch`) bằng `heap_caps_aligned_alloc(16, ..., MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)`. Việc đọc trọng số int8 từ Internal SRAM tránh làm nghẽn bus và cache của Octal PSRAM.
+   - **Octal PSRAM**: Cấp phát KV-cache, hidden prefix, và workspace qua `heap_caps_malloc(..., MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)`.
+
+4. **Tối ưu hóa Luồng Inference**:
+   - **RoPE Precomputation**: Bảng `sin`/`cos` được tính toán trước tại thời điểm `bind_workspace`, loại bỏ hoàn toàn các hàm lượng giác siêu việt (`pow`, `sin`, `cos`) trong vòng lặp giải mã.
+   - **Fused RMSNorm & Quantization**: Trong pha decode, chuẩn hóa RMSNorm và lượng tử hóa kích hoạt int8 chỉ thực hiện một lần cho cả 3 phép chiếu Q, K, V dạng tam phân.
+   - **Cache Locality trong Attention**: Hoán đổi thứ tự vòng lặp tính tổng có trọng số của vector Value, chuẩn hóa trọng số một lần và duyệt bộ nhớ với bước nhảy đơn vị (unit stride).
+
 ## Build và chạy host
 
 Từ root dự án, dùng Python environment đã cài torch/transformers:

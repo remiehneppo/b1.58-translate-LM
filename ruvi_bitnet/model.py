@@ -20,8 +20,8 @@ class RuViConfig:
     dropout: float = 0.1
     label_smoothing: float = 0.1
     init_std: float = 0.02
-    quantize_first_layer: bool = False  # Layer 0 (lớp đầu vào) giữ FP16/INT8, không lượng tử hóa tam phân
-    quantize_last_layer: bool = False   # Layer L-1 (lớp đầu ra) giữ FP16/INT8, bảo toàn phân phối logits
+    quantize_first_layer: bool = True   # Layer 0 dùng BitLinear (full ternary, sát BitNet b1.58)
+    quantize_last_layer: bool = True    # Layer L-1 dùng BitLinear (full ternary, sát BitNet b1.58)
     quantize_hidden_layers: bool = True  # False: toàn bộ phép chiếu dùng nn.Linear (BF16 baseline)
     pad_token_id: int = 0
     bos_token_id: int = 1

@@ -6,8 +6,46 @@ config RUVI_CONTEXT
 config RUVI_MAX_NEW
     int "Maximum generated tokens"
     range 1 128
-    default 8
+    default 16
 config RUVI_PROMPT
     string "Comma-separated prefix token IDs (including language tag and separator)"
-    default "4,100,200,300,3"
+    default "4,2441,3938,18,421,2507,337,37,3"
+
+choice RUVI_BACKEND
+    prompt "Inference execution backend"
+    default RUVI_BACKEND_S3
+    help
+        Select inference execution backend.
+
+config RUVI_BACKEND_SCALAR
+    bool "Scalar CPU reference"
+
+config RUVI_BACKEND_TILED
+    bool "Portable tiled kernel"
+
+config RUVI_BACKEND_S3
+    bool "ESP32-S3 128-bit EE SIMD accelerated"
+endchoice
+
+config RUVI_CORES
+    int "Number of CPU cores"
+    range 1 2
+    default 2
+
+config RUVI_MODEL_IN_PSRAM
+    bool "Load model weights into PSRAM at startup"
+    default y
+    help
+        Copies the model blob from Flash into Octal PSRAM at startup.
+        Eliminates Flash Cache thrashing and accelerates inference.
+
+config RUVI_TILE_ROWS
+    int "Weight tile rows (8, 16, or 32)"
+    range 8 32
+    default 16
+
+config RUVI_MICROBATCH
+    int "Prefill microbatch size"
+    range 1 64
+    default 16
 endmenu

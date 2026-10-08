@@ -2,7 +2,7 @@
   "backend": "tokenizers",
   "bos_token": "<bos>",
   "eos_token": "<eos>",
-  "additional_special_tokens": [
+  "extra_special_tokens": [
     "<sep>",
     "<2ru>",
     "<2vi>"

@@ -26,7 +26,10 @@ class NativeRegression(unittest.TestCase):
         cls.root = Path(cls.directory.name)
         cls.executable = cls.root / 'ruvi-native'
         subprocess.run(['g++', '-std=c++17', '-O2', '-ffp-contract=off', str(ROOT / 'native/main.cpp'),
-                        str(ROOT / 'native/ruvi.cpp'), '-o', str(cls.executable)], check=True)
+                        str(ROOT / 'native/ruvi.cpp'), str(ROOT / 'native/parallel.cpp'),
+                        str(ROOT / 'native/tokenizer.cpp'), str(ROOT / 'native/tokenizer_data.cpp'),
+                        str(ROOT / 'native/kernels/kernel.cpp'),
+                        str(ROOT / 'native/kernels/kernel_s3.cpp'), '-o', str(cls.executable)], check=True)
 
     @classmethod
     def tearDownClass(cls):

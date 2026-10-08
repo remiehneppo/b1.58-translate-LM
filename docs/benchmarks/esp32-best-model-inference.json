@@ -1,0 +1,50 @@
+{
+  "backend": "esp32s3-simd",
+  "model_bytes": 8027088,
+  "workspace_bytes": 952448,
+  "sram_scratch_bytes": 21824,
+  "image_crc32": 3478828807,
+  "load_ms": 3516.962,
+  "prefill_ms": 3896.252,
+  "decode_ms": 11084.374,
+  "decode_steps": 7,
+  "minimum_free_psram_bytes": 7419496,
+  "minimum_free_sram_bytes": 356299,
+  "generated_ids": [
+    676,
+    442,
+    1294,
+    662,
+    445,
+    349,
+    464,
+    267
+  ],
+  "prompt_ids": [
+    4,
+    100,
+    200,
+    300,
+    3
+  ],
+  "context": 128,
+  "cpu_mhz": 240,
+  "decode_tokens_per_second": 0.6315196588264388,
+  "inference_compute_ms": 14980.626,
+  "host_greedy_ids_match": true,
+  "measurement": "hardware execution on ESP32-S3 QFN56 r0.2; 8MB Octal PSRAM @ 80MHz; Flash QIO @ 80MHz",
+  "model_sha256": "91ed588251f773cead9f3e8026f486b4deb1bd8c1fce397ad13437f27a54118a",
+  "model_config": {
+    "vocab_size": 8192,
+    "d_model": 384,
+    "n_layers": 5,
+    "n_heads": 6,
+    "n_kv_heads": 2,
+    "head_dim": 64,
+    "d_ff": 1280,
+    "quantize_first_layer": true,
+    "quantize_last_layer": true,
+    "quantize_hidden_layers": true
+  },
+  "idf_version": "v6.0.1"
+}

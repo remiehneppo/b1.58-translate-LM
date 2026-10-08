@@ -20,8 +20,8 @@ HEADER_SIZE = 80
 
 
 def load_native_reference(checkpoint, float_storage='bf16'):
-    if float_storage not in ('bf16', 'fp32'):
-        raise ValueError('float_storage must be bf16 or fp32')
+    if float_storage not in ('int8', 'bf16', 'fp32'):
+        raise ValueError('float_storage must be int8, bf16 or fp32')
     ckpt = torch.load(checkpoint, map_location='cpu', weights_only=False)  # Trusted local files only.
     cfg = checkpoint_config(ckpt)
     model = RuViBitNet10M(cfg).eval()
@@ -33,6 +33,14 @@ def load_native_reference(checkpoint, float_storage='bf16'):
                     beta = module.weight.abs().mean().clamp(min=1e-5)
                     module.weight.copy_((module.weight / beta).round().clamp(-1, 1))
                     module.export_scale = beta
+            elif float_storage == 'int8':
+                for parameter in module.parameters(recurse=False):
+                    if parameter.ndim == 2:
+                        scale = parameter.abs().amax().clamp(min=1e-5) / 127.0
+                        q = torch.clamp(torch.round(parameter / scale), -128, 127) * scale
+                        parameter.copy_(q)
+                    else:
+                        parameter.copy_(parameter.to(torch.bfloat16).float())
             elif float_storage == 'bf16':
                 for parameter in module.parameters(recurse=False):
                     parameter.copy_(parameter.to(torch.bfloat16).float())
@@ -79,7 +87,13 @@ def export_native(checkpoint, output, float_storage='bf16'):
                     kind = 2
                     payload = pack_ternary_to_2bit(weight.to(torch.int8)).numpy().tobytes()
                     beta = scale.item()
-                elif float_storage == 'bf16':
+                elif float_storage == 'int8' and weight.ndim == 2:
+                    kind = 3
+                    scale_val = weight.abs().amax().clamp(min=1e-5).item() / 127.0
+                    weight_q = torch.clamp(torch.round(weight / scale_val), -128, 127).to(torch.int8)
+                    payload = weight_q.numpy().tobytes()
+                    beta = scale_val
+                elif float_storage == 'bf16' or (float_storage == 'int8' and weight.ndim != 2):
                     kind, beta = 1, 1.0
                     payload = weight.to(torch.bfloat16).view(torch.int16).numpy().astype('<u2').tobytes()
                 else:
@@ -117,7 +131,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--checkpoint', required=True)
     parser.add_argument('--output', required=True)
-    parser.add_argument('--float-storage', choices=['bf16', 'fp32'], default='bf16')
+    parser.add_argument('--float-storage', choices=['int8', 'bf16', 'fp32'], default='int8')
     args = parser.parse_args()
     report = export_native(args.checkpoint, args.output, args.float_storage)
     print(json.dumps({key: report[key] for key in ('format', 'image_bytes', 'sha256')}))

@@ -53,6 +53,7 @@ int main(int argc, char** argv) {
         std::string path, prompt, dump;
         uint32_t context = 128, max_new = 8, repeats = 1;
         bool describe = false;
+        ruvi::KernelOptions options;
         for (int i = 1; i < argc; ++i) {
             const std::string flag = argv[i];
             if (flag == "--describe") { describe = true; continue; }
@@ -64,11 +65,20 @@ int main(int argc, char** argv) {
             else if (flag == "--max-new") max_new = number(value);
             else if (flag == "--repeat") repeats = number(value);
             else if (flag == "--logits") dump = value;
+            else if (flag == "--backend") {
+                if (value == "scalar") options.backend = ruvi::Backend::Scalar;
+                else if (value == "tiled") options.backend = ruvi::Backend::Tiled;
+                else if (value == "s3") options.backend = ruvi::Backend::S3;
+                else throw std::invalid_argument("unknown backend (expected scalar, tiled, or s3)");
+            } else if (flag == "--cores") options.cores = number(value);
+            else if (flag == "--tile-rows") options.tile_rows = number(value);
+            else if (flag == "--microbatch") options.microbatch = number(value);
             else throw std::invalid_argument("unknown option");
         }
         if (path.empty() || !repeats || repeats > 10000) throw std::invalid_argument("--model and valid --repeat required");
         const auto start_load = Clock::now();
         Image image(path); ruvi::Model model;
+        model.set_options(options);
         if (!model.load(image.data, image.size)) throw std::runtime_error(model.error());
         const double load_ms = milliseconds(start_load);
         size_t bytes = model.workspace_bytes(context);
@@ -134,7 +144,10 @@ int main(int argc, char** argv) {
             }
         }
         double decode_sum = 0; for (double t : decodes) decode_sum += t;
-        std::cout << "{\"backend\":\"scalar-cpu\",\"model_bytes\":" << model.image_bytes()
+        const char* backend_str = (model.effective_backend() == ruvi::Backend::Scalar ? "scalar-cpu" :
+                                  (model.effective_backend() == ruvi::Backend::S3 ? "esp32s3-simd" : "tiled-cpu"));
+        std::cout << "{\"backend\":\"" << backend_str << "\""
+                  << ",\"model_bytes\":" << model.image_bytes()
                   << ",\"image_crc32\":" << model.image_crc32() << ",\"load_ms\":" << load_ms
                   << ",\"workspace_bytes\":" << bytes << ",\"peak_rss_kib\":" << peak_rss_kib
                   << ",\"peak_rss_source\":\"" << rss_source << "\""

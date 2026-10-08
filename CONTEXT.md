@@ -48,6 +48,21 @@ _Avoid_: Word-Level Token KL, Cross-Vocab Logit Matching
 Thiết kế kiến trúc giữ nguyên tầng Transformer đầu vào (`layers.0`) và tầng Transformer đầu ra (`layers.{n_layers-1}`; bản 10M là `layers.4`) ở độ chính xác cao (`nn.Linear` FP16/INT8), trong khi các tầng trung gian sử dụng `BitLinear` tam phân 1.58-bit. Thiết kế này bảo toàn entropy thông tin sau embedding và giữ sắc nét phân phối xác suất trước `lm_head`.
 _Avoid_: Full-Ternary All-Layers, Uniform Quantization
 
+**Offline INT8 Non-Ternary Quantization**:
+Lượng tử hóa trước (offline) toàn bộ ma trận trọng số không phải tam phân (`embed_tokens.weight`, `lm_head`, các dense projection) từ BF16 sang signed INT8 có scale per-tensor hoặc per-channel khi xuất artifact RUVI0001. Giảm 50% dung lượng ma trận và cho phép thực thi trực tiếp trên SIMD 128-bit không cần giải nén động trên chip.
+_Avoid_: Dynamic On-Chip Quantization, Full-Precision Float Head
+
+**Sub-Vocabulary Masking**:
+Kỹ thuật lọc không gian từ vựng mục tiêu dựa trên thẻ ngôn ngữ đầu vào (`<2ru>` hoặc `<2vi>`). Bỏ qua các phép tính dot product của các token không thuộc ngôn ngữ đích ở tầng LM Head, giảm từ 33% đến 63% khối lượng tính toán tầng Output.
+_Avoid_: Full-Vocab Unconditional Argmax
+
+**PSRAM Model Caching**:
+Kỹ thuật sao chép toàn bộ khối nhị phân mô hình từ SPI Flash vào Octal PSRAM khi khởi động vi điều khiển. Giải phóng bus SPI Flash cho Instruction Cache, tăng băng thông đọc dữ liệu lên 2.5x và loại bỏ hiện tượng tráo đổi dòng cache (cache thrashing).
+_Avoid_: Pure Flash XIP on Thrashing Workloads
+
+**Dual-Core N-Split SIMD**:
+Mô hình phân chia tính toán phép nhân ma trận (GEMV/GEMM) trên ESP32-S3 theo chiều hàng ngõ ra $N$ giữa Core 0 và Core 1. Đảm bảo tính toán độc lập, không xung đột vùng nhớ và bảo toàn bit-exact thứ tự tích lũy.
+
 ## Relationships
 
 - **BitLinear Attention** thực hiện các phép chiếu Q, K, V, O bằng **BitLinear b1.58** layer trước khi tính ma trận chú ý chuẩn qua Softmax.

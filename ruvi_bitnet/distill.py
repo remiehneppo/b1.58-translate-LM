@@ -22,6 +22,14 @@ class TranslationPrefixDataset(Dataset):
         tgt_ids = item["tgt_ids"]
         tag_id = self.cfg.tag_ru_id if item["direction"] == "vi2ru" else self.cfg.tag_vi_id
 
+        # Fit [TAG] src [SEP] tgt [EOS] into max_seq_len, trimming the source before the target.
+        budget = self.cfg.max_seq_len - 3
+        if budget < 1:
+            raise ValueError("max_seq_len must be at least 4 to hold [TAG] src [SEP] tgt [EOS]")
+        if len(src_ids) + len(tgt_ids) > budget:
+            tgt_ids = tgt_ids[: max(1, budget - len(src_ids))]
+            src_ids = src_ids[: budget - len(tgt_ids)]
+
         # Prefix: [TAG] + src + [SEP]
         prefix = [tag_id] + src_ids + [self.cfg.sep_token_id]
         # Target: tgt + [EOS]

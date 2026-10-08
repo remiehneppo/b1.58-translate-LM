@@ -1,0 +1,52 @@
+{
+  "backend": "esp32s3-simd-dual-core-int8-psram",
+  "model_bytes": 4881360,
+  "workspace_bytes": 972928,
+  "sram_scratch_bytes": 42304,
+  "image_crc32": 3817763130,
+  "load_ms": 1934.388,
+  "prefill_ms": 5195.026,
+  "decode_ms": 5493.250,
+  "decode_steps": 9,
+  "decode_ms_per_token": 610.36,
+  "decode_tokens_per_second": 1.63837,
+  "minimum_free_psram_bytes": 2521748,
+  "minimum_free_sram_bytes": 331215,
+  "translation": "Привет, ты хорошо себя чувствуешь?",
+  "generated_ids": [
+    2494,
+    1327,
+    18,
+    617,
+    1535,
+    1271,
+    1737,
+    4363,
+    37,
+    2
+  ],
+  "prompt_ids": [
+    4,
+    2441,
+    3938,
+    18,
+    421,
+    2507,
+    337,
+    37,
+    3
+  ],
+  "context": 128,
+  "cpu_mhz": 240,
+  "optimizations": [
+    "Full model weights cached in Octal PSRAM (4.88 MB)",
+    "Offline INT8 quantization for embed_tokens and dense layers",
+    "Dual-core Xtensa 128-bit EE SIMD execution (ee.vmulas.s8.accx)",
+    "Sub-vocabulary masking (ru/vi language direction)",
+    "Direct pointer arithmetic (eliminated Tensor::value call overhead)",
+    "Internal SRAM tile scratch buffers (42.3 KB)",
+    "Embedded C++ BPE Tokenizer in Flash"
+  ],
+  "hardware": "ESP32-S3 QFN56 r0.2, 8MB Octal PSRAM @ 80MHz, 16MB Flash @ 80MHz",
+  "idf_version": "v6.0.1"
+}
