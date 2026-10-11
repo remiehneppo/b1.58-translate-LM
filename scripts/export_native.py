@@ -12,7 +12,7 @@ import zlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import torch
-from ruvi_bitnet.model import BitLinear, RuViBitNet10M
+from ruvi_bitnet.model import BitLinear, Int8Linear, RuViBitNet10M
 from ruvi_bitnet.checkpoint import checkpoint_config, load_checkpoint_weights, pack_ternary_to_2bit
 
 MAGIC = b'RUVI0001'
@@ -33,6 +33,11 @@ def load_native_reference(checkpoint, float_storage='bf16'):
                     beta = module.weight.abs().mean().clamp(min=1e-5)
                     module.weight.copy_((module.weight / beta).round().clamp(-1, 1))
                     module.export_scale = beta
+            elif isinstance(module, Int8Linear):
+                if module.export_scale is None:
+                    scale = module.weight.abs().amax().clamp(min=1e-5) / 127.0
+                    module.weight.copy_(torch.clamp(torch.round(module.weight / scale), -128, 127))
+                    module.export_scale = scale
             elif float_storage == 'int8':
                 for parameter in module.parameters(recurse=False):
                     if parameter.ndim == 2:
@@ -65,6 +70,12 @@ def export_native(checkpoint, output, float_storage='bf16'):
                     weight = (weight / scale).round().clamp(-1, 1)
                 else:
                     scale = module.export_scale.float()
+            elif isinstance(module, Int8Linear):
+                if module.export_scale is None:
+                    scale = weight.abs().amax().clamp(min=1e-5) / 127.0
+                    weight = torch.clamp(torch.round(weight / scale), -128, 127)
+                else:
+                    scale = module.export_scale.float()
             tensors.append((f'layers.{i}.{name}.weight', weight, scale))
     tensors.append(('norm.weight', model.norm.weight, None))
     output = Path(output)
@@ -81,11 +92,13 @@ def export_native(checkpoint, output, float_storage='bf16'):
                 rows, cols = weight.shape if weight.ndim == 2 else (1, weight.numel())
                 if scale is not None:
                     if scale.numel() != 1 or not torch.isfinite(scale).all() or scale.item() <= 0:
-                        raise ValueError(f'Invalid ternary scale: {name}')
-                    if not ((weight == -1) | (weight == 0) | (weight == 1)).all():
-                        raise ValueError(f'Invalid ternary values: {name}')
-                    kind = 2
-                    payload = pack_ternary_to_2bit(weight.to(torch.int8)).numpy().tobytes()
+                        raise ValueError(f'Invalid scale: {name}')
+                    if ((weight == -1) | (weight == 0) | (weight == 1)).all():
+                        kind = 2
+                        payload = pack_ternary_to_2bit(weight.to(torch.int8)).numpy().tobytes()
+                    else:
+                        kind = 3
+                        payload = weight.to(torch.int8).numpy().tobytes()
                     beta = scale.item()
                 elif float_storage == 'int8' and weight.ndim == 2:
                     kind = 3
@@ -104,10 +117,12 @@ def export_native(checkpoint, output, float_storage='bf16'):
                 stream.write(record)
                 manifest.append(dict(name=name, shape=[rows, cols], kind=kind, payload_bytes=len(payload)))
             size = stream.tell()
-            header = struct.pack('<8s12I2fII', MAGIC, cfg.vocab_size, cfg.d_model, cfg.n_layers,
+            attn_softcap = float(cfg.attn_logit_softcapping) if getattr(cfg, 'attn_logit_softcapping', None) is not None else 0.0
+            final_softcap = float(cfg.final_logit_softcapping) if getattr(cfg, 'final_logit_softcapping', None) is not None else 0.0
+            header = struct.pack('<8s12I2fII2f', MAGIC, cfg.vocab_size, cfg.d_model, cfg.n_layers,
                                  cfg.n_heads, cfg.n_kv_heads, cfg.head_dim, cfg.d_ff, cfg.max_seq_len,
                                  cfg.eos_token_id, cfg.pad_token_id, cfg.tag_ru_id, cfg.tag_vi_id,
-                                 cfg.rope_theta, cfg.eps, size, 0)
+                                 cfg.rope_theta, cfg.eps, size, 0, attn_softcap, final_softcap)
             stream.seek(0)
             stream.write(header + bytes(HEADER_SIZE - len(header)))
             stream.seek(0)

@@ -72,7 +72,7 @@ Status run(const Problem& p, const Options& o, const Scratch& s) {
         p.n > max / p.k || o.n_begin > p.n || p.input_stride < pk ||
         p.output_stride < p.n || !p.multiplier_stride ||
         (o.backend != Backend::portable && o.backend != Backend::automatic &&
-         o.backend != Backend::esp32_s3)) return Status::invalid_argument;
+         o.backend != Backend::esp32_s3 && o.backend != Backend::rv1103_neon)) return Status::invalid_argument;
     const size_t count = o.n_count == SIZE_MAX ? p.n - o.n_begin : o.n_count;
     if (count > p.n - o.n_begin) return Status::invalid_argument;
     const size_t elements = p.n * p.k;
@@ -95,9 +95,15 @@ Status run(const Problem& p, const Options& o, const Scratch& s) {
     const bool direct = aligned16(p.input) && (p.m == 1 || p.input_stride % 16 == 0);
     const bool can_s3 = esp32_s3_available() && aligned16(s.weights) &&
         (direct || (s.input_copy && aligned16(s.input_copy)));
+    const bool can_rv1103 = rv1103_neon_available() && aligned16(s.weights) &&
+        (direct || (s.input_copy && aligned16(s.input_copy)));
     if (o.backend == Backend::esp32_s3 && !can_s3)
         return esp32_s3_available() ? Status::invalid_argument : Status::unsupported;
-    const bool use_s3 = o.backend != Backend::portable && can_s3;
+    if (o.backend == Backend::rv1103_neon && !can_rv1103)
+        return rv1103_neon_available() ? Status::invalid_argument : Status::unsupported;
+    const bool use_rv1103 = (o.backend == Backend::rv1103_neon) || (o.backend == Backend::automatic && can_rv1103);
+    const bool use_s3 = (o.backend == Backend::esp32_s3) || (o.backend == Backend::automatic && !can_rv1103 && can_s3);
+    const bool use_simd = use_rv1103 || use_s3;
     const size_t end = o.n_begin + count;
     for (size_t first = o.n_begin; first < end;) {
         const size_t rows = end - first < o.tile_rows ? end - first : o.tile_rows;
@@ -123,7 +129,7 @@ Status run(const Problem& p, const Options& o, const Scratch& s) {
         }
         for (size_t m = 0; m < p.m; ++m) {
             const int8_t* x = p.input + m * p.input_stride;
-            if (use_s3 && !direct) {
+            if (use_simd && !direct) {
                 std::memcpy(s.input_copy, x, p.k);
                 std::memset(s.input_copy + p.k, 0, pk - p.k);
                 x = s.input_copy;
@@ -131,7 +137,10 @@ Status run(const Problem& p, const Options& o, const Scratch& s) {
             const float factor = p.weight_scale / p.multipliers[m * p.multiplier_stride];
             for (size_t r = 0; r < rows; ++r) {
                 int32_t sum;
-                if (use_s3) {
+                if (use_rv1103) {
+                    const Status status = dot_rv1103_aligned(x, s.weights + r * pk, pk, &sum);
+                    if (status != Status::ok) return status;
+                } else if (use_s3) {
                     const Status status = dot_s3_aligned(x, s.weights + r * pk, pk, &sum);
                     if (status != Status::ok) return status;
                 } else {

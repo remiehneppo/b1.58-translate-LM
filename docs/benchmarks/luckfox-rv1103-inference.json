@@ -1,0 +1,39 @@
+{
+  "backend": "rv1103-neon",
+  "board": "Luckfox Pico / Pico Plus / Pico Mini (Rockchip RV1103)",
+  "hardware": "ARM Cortex-A7 single-core @ 1.1 GHz / 1.2 GHz, 64MB DDR2, Linux 5.10.110 armv7l",
+  "model_bytes": 4881360,
+  "workspace_bytes": 952448,
+  "image_crc32": 3817763130,
+  "context": 128,
+  "runs": [
+    {
+      "direction": "vi2ru",
+      "prompt": "Xin chào, bạn khỏe không?",
+      "prompt_ids": [4, 2441, 3938, 18, 421, 2507, 337, 37, 3],
+      "generated_ids": [2494, 1327, 18, 617, 1535, 1271, 1737, 4363, 37, 2],
+      "translation": "Привет, ты хорошо себя чувствуешь?",
+      "prefill_ms": 1181.17,
+      "ttft_ms": 1181.26,
+      "decode_ms": 1223.42,
+      "decode_steps": 9,
+      "decode_tokens_per_second": 7.356,
+      "total_ms": 2405.42,
+      "peak_rss_kib": 6788
+    },
+    {
+      "direction": "ru2vi",
+      "prompt": "Привет, как дела?",
+      "prompt_ids": [5, 2494, 18, 521, 2673, 37, 3],
+      "generated_ids": [360, 550, 780, 18, 506, 337, 37, 2],
+      "translation": "Xin chào thế nào?",
+      "prefill_ms": 917.695,
+      "ttft_ms": 917.771,
+      "decode_ms": 940.048,
+      "decode_steps": 7,
+      "decode_tokens_per_second": 7.446,
+      "total_ms": 1858.4,
+      "peak_rss_kib": 6788
+    }
+  ]
+}

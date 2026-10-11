@@ -20,7 +20,10 @@ def check_native(checkpoint, image, executable, prompt, max_new=8, context=128,
     expected_logits = []
     # The final RMSNorm executes once per prediction in generate(), including prefill.
     def capture(_module, _inputs, output):
-        expected_logits.append(torch.nn.functional.linear(output[:, -1:], model.embed_tokens.weight)[0, 0].detach())
+        logits = torch.nn.functional.linear(output[:, -1:], model.embed_tokens.weight)[0, 0].detach()
+        if getattr(model.config, 'final_logit_softcapping', None) is not None and model.config.final_logit_softcapping > 0:
+            logits = model.config.final_logit_softcapping * torch.tanh(logits / model.config.final_logit_softcapping)
+        expected_logits.append(logits)
     handle = model.norm.register_forward_hook(capture)
     try:
         expected_ids = model.generate(ids, max_new_tokens=max_new)[0, len(prompt):].tolist()

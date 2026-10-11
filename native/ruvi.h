@@ -7,7 +7,7 @@ namespace ruvi {
 struct Config {
     uint32_t vocab, dim, layers, heads, kv_heads, head_dim, ff, max_context;
     uint32_t eos, pad, tag_ru, tag_vi;
-    float theta, eps;
+    float theta, eps, attn_softcap, final_softcap;
 };
 struct Tensor {
     const uint8_t* data = nullptr;
@@ -15,7 +15,7 @@ struct Tensor {
     float scale = 1;
     float value(size_t index) const;
 };
-enum class Backend { Scalar, Tiled, S3 };
+enum class Backend { Scalar, Tiled, S3, RV1103 };
 struct KernelOptions {
     Backend backend = Backend::Scalar;
     uint32_t cores = 1, tile_rows = 16, microbatch = 16;
@@ -73,6 +73,7 @@ private:
     void linear_int8(const Tensor& weight, const int8_t* input_quant, float multiplier, float* output, const uint8_t* subvocab_mask = nullptr);
     void linear_ternary(const Tensor& weight, const int8_t* input_quant, float multiplier, float* output, uint32_t tokens = 1, size_t in_stride = 0, size_t out_stride = 0);
     void rms(const float* input, float* output, const Tensor& weight);
+    void rms_heads(const float* input, float* output, const Tensor& weight, uint32_t heads, uint32_t head_dim);
     void quantize_row(const float* input, uint32_t cols, int8_t* out, float& multiplier);
     void rope(float* values, uint32_t heads, uint32_t position);
     void keys(const Layer& layer, uint32_t index, const float* input, uint32_t position);

@@ -29,7 +29,8 @@ class NativeRegression(unittest.TestCase):
                         str(ROOT / 'native/ruvi.cpp'), str(ROOT / 'native/parallel.cpp'),
                         str(ROOT / 'native/tokenizer.cpp'), str(ROOT / 'native/tokenizer_data.cpp'),
                         str(ROOT / 'native/kernels/kernel.cpp'),
-                        str(ROOT / 'native/kernels/kernel_s3.cpp'), '-o', str(cls.executable)], check=True)
+                        str(ROOT / 'native/kernels/kernel_s3.cpp'),
+                        str(ROOT / 'native/kernels/kernel_rv1103.cpp'), '-o', str(cls.executable)], check=True)
 
     @classmethod
     def tearDownClass(cls):

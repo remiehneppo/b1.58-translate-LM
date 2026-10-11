@@ -37,19 +37,25 @@ def export_model(
         is_bitlinear = is_linear and name.endswith(".weight") and param.ndim == 2 and not (is_first or is_last)
 
         if is_bitlinear:
-            # Quantize the BitLinear shadow weights; keep scale in FP32.
-            beta = param.abs().mean().clamp(min=1e-5)
-            w_scaled = param / beta
-            w_q = torch.clamp(torch.round(w_scaled), -1.0, 1.0).to(torch.int8)
-
-            if pack_2bit:
-                # Nén 2-bit: 4 weight / 1 byte
-                quantized_state[name + "_packed"] = pack_ternary_to_2bit(w_q)
-                quantized_state[name + "_shape"] = list(param.shape)
+            if getattr(cfg, "weight_quant", "ternary") == "int8":
+                scale = param.abs().amax().clamp(min=1e-5) / 127.0
+                w_q = torch.clamp(torch.round(param / scale), -128, 127).to(torch.int8)
+                quantized_state[name] = w_q
+                quantized_state[name + "_scale"] = scale
             else:
-                quantized_state[name] = w_q.to(torch.bfloat16)
+                # Quantize the BitLinear shadow weights; keep scale in FP32.
+                beta = param.abs().mean().clamp(min=1e-5)
+                w_scaled = param / beta
+                w_q = torch.clamp(torch.round(w_scaled), -1.0, 1.0).to(torch.int8)
 
-            quantized_state[name + "_scale"] = beta  # Keep full precision to match training forward.
+                if pack_2bit:
+                    # Nén 2-bit: 4 weight / 1 byte
+                    quantized_state[name + "_packed"] = pack_ternary_to_2bit(w_q)
+                    quantized_state[name + "_shape"] = list(param.shape)
+                else:
+                    quantized_state[name] = w_q.to(torch.bfloat16)
+
+                quantized_state[name + "_scale"] = beta  # Keep full precision to match training forward.
 
         else:
             # Embedding, sandwich layers and RMSNorm remain BF16.

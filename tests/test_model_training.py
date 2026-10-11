@@ -11,7 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import torch
 from torch.utils.data import DataLoader
-from ruvi_bitnet.model import BitLinear, RuViBitNet10M, RuViConfig
+from ruvi_bitnet.model import BitLinear, Int8Linear, RuViBitNet10M, RuViInt8_10M, RuViConfig
 from ruvi_bitnet.distill import TranslationPrefixDataset, collate_prefix_fn
 from scripts.export_quantized import export_model
 from scripts.export_bf16 import export_bf16
@@ -98,6 +98,24 @@ class Regressions(unittest.TestCase):
         self.assertEqual(logic.weight.element_size(), 1)
         with self.assertRaises(ValueError):
             logic.load_ternary(torch.full_like(weight, 2), torch.tensor(1.0))
+
+    def test_int8_linear_ste_and_model_forward(self):
+        layer = Int8Linear(16, 8, bias=False)
+        x = torch.randn(2, 4, 16, requires_grad=True)
+        out = layer(x)
+        out.sum().backward()
+        self.assertIsNotNone(layer.weight.grad)
+        self.assertIsNotNone(x.grad)
+        self.assertTrue(torch.isfinite(layer.weight.grad).all())
+
+        cfg = small_config(weight_quant="int8", quantize_first_layer=True, quantize_last_layer=True)
+        model = RuViInt8_10M(cfg)
+        modules = [m for m in model.modules() if isinstance(m, Int8Linear)]
+        self.assertEqual(len(modules), cfg.n_layers * 6)
+        ids = torch.tensor([[4, 8, 3, 9, 2]])
+        labels = ids.clone()
+        res = model(ids, prefix_len=3, labels=labels)
+        self.assertTrue(torch.isfinite(res['loss']))
 
     def test_dataset_truncates_to_max_seq_len(self):
         cfg = small_config(max_seq_len=12)

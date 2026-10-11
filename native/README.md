@@ -110,26 +110,61 @@ không phải bit-exact: checker yêu cầu greedy IDs khớp và logits nằm t
 công bố (demo mặc định atol=0.02, rtol=0.005). Regression model nhỏ dùng atol=2e-5.
 Parity pass không chứng minh chất lượng bản dịch, hoặc bảo đảm mọi prompt cho cùng IDs.
 
-## Luckfox Pico Pro và EBAZ4205
+## Luckfox Pico RV1103 (ARM Cortex-A7 NEON) và EBAZ4205
+
+Luckfox Pico / Pico Mini / Pico Plus trang bị vi xử lý **Rockchip RV1103** (ARM Cortex-A7 single-core @ 1.2 GHz, 32KB L1 D-Cache, 128KB L2 Cache, 64MB DDR2, Linux 5.10).
+
+Runtime `ruvi-native` tích hợp kernel SIMD **ARMv7-A NEON** (`native/kernels/kernel_rv1103.S` và `kernel_rv1103.cpp`) mở rộng 64-byte unrolled dot product với 2 bộ tích lũy 32-bit song song (`vpadal.s16`) và giải nén tile 16 hàng nằm trọn trong L1 D-Cache (6.14 KB).
 
 Chọn **compiler và libc khớp OS/image đang chạy**. Ví dụ Luckfox SDK Buildroot dùng
-`arm-rockchip830-linux-uclibcgnueabihf-g++`; Ubuntu ARM có thể dùng GNU armhf toolchain.
+`arm-rockchip830-linux-uclibcgnueabihf-g++`; Ubuntu ARM có thể dùng GNU armhf toolchain (`arm-linux-gnueabihf-g++`).
 Không dùng binary uClibc trên hệ glibc hoặc ngược lại.
 [Hướng dẫn cross-compile của Luckfox](https://wiki.luckfox.com/zh/Luckfox-Pico-Plus-Mini/Cross-Compile/).
 
 ```sh
-# Trỏ tới g++ của SDK đúng với board/image:
-export RUVI_ARM_CXX=/absolute/path/to/arm-rockchip830-linux-uclibcgnueabihf-g++
+# Cách 1: Sử dụng toolchain file cấu hình sẵn cho RV1103:
+export RUVI_TOOLCHAIN_PREFIX=/path/to/luckfox-pico/tools/linux/toolchain/arm-rockchip830-linux-uclibcgnueabihf/bin/arm-rockchip830-linux-uclibcgnueabihf-
+cmake -S native -B native/build-rv1103 \
+  -DCMAKE_TOOLCHAIN_FILE=native/toolchain-rv1103.cmake \
+  -DRUVI_TOOLCHAIN_PREFIX="$RUVI_TOOLCHAIN_PREFIX"
+cmake --build native/build-rv1103 -j$(nproc)
+
+# Cách 2: Trỏ trực tiếp tới compiler g++:
+export RUVI_ARM_CXX=/path/to/arm-rockchip830-linux-uclibcgnueabihf-g++
 cmake -S native -B native/build-arm \
   -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=arm \
   -DCMAKE_CXX_COMPILER="$RUVI_ARM_CXX"
-cmake --build native/build-arm -j2
+cmake --build native/build-arm -j$(nproc)
 ```
 
-Chuyển executable `native/build-arm/ruvi-native`, `demo.bin` và manifest lên board
-bằng phương thức hiện có. EBAZ mod SD có thể lưu file trên SD. Chạy đúng command host
-với cùng prompt/context; lưu JSON stdout cùng thông tin board, OS, CPU clock và artifact
-SHA256. Chỉ sau khi CPU benchmark hoàn tất mới đánh giá NPU/FPGA.
+Chuyển executable `ruvi-native`, model artifact `ruvi_best_int8.bin` (4.88 MB) và manifest lên board qua ADB/SSH/SD-card:
+
+```sh
+adb push native/build-rv1103/ruvi-native /userdata/
+adb push native/artifacts/ruvi_best_int8.bin /userdata/
+adb push native/artifacts/ruvi_best_int8.bin.json /userdata/
+
+# Đăng nhập vào shell board:
+adb shell   # hoặc ssh root@172.32.0.93 (password: luckfox)
+cd /userdata
+
+# Cách 1: Dịch trực tiếp văn bản tự nhiên (CLI 1 lần):
+./ruvi-native --model ruvi_best_int8.bin --text "Xin chào, bạn khỏe không?" --dir vi2ru --backend rv1103
+./ruvi-native --model ruvi_best_int8.bin --text "Привет, как дела?" --dir ru2vi --backend rv1103
+
+# Cách 2: Chế độ tương tác gõ trực tiếp (Interactive Chat Mode):
+./ruvi-native --model ruvi_best_int8.bin -i --backend rv1103
+# [vi2ru] > Tôi có một con bò.
+# => У меня есть коров. (8.6 tok/s)
+# [vi2ru] > :dir ru2vi
+# [ru2vi] > Открой сейф.
+# => Mở két sắt ra. (8.5 tok/s)
+
+# Cách 3: Chạy với token IDs thô để đo đạc benchmark:
+./ruvi-native --model ruvi_best_int8.bin --prompt 4,12,34,56,2 --context 128 --max-new 8 --backend rv1103
+```
+
+Chỉ sau khi CPU NEON benchmark hoàn tất mới đánh giá NPU/FPGA. Chi tiết thiết kế kiến trúc xem [ADR 0006](../docs/adr/0006-luckfox-pico-rv1103-neon-kernel.md).
 
 ## ESP32-S3 N16R8
 

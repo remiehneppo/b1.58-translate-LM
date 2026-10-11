@@ -1,4 +1,4 @@
-"""Export BPE vocabulary string table and sub-vocabulary bitmasks to C++ source."""
+"""Export BPE vocabulary string table, byte mapping, merges, and sub-vocabulary bitmasks to C++ source."""
 import json
 from pathlib import Path
 from tokenizers import Tokenizer
@@ -18,9 +18,41 @@ def has_latin(text):
     return any("LATIN" in unicodedata.name(c, "") for c in text)
 
 
+def bytes_to_unicode():
+    bs = list(range(ord("!"), ord("~") + 1)) + list(range(ord("¡"), ord("¬") + 1)) + list(range(ord("®"), ord("ÿ") + 1))
+    cs = bs[:]
+    n = 0
+    for b in range(256):
+        if b not in bs:
+            bs.append(b)
+            cs.append(256 + n)
+            n += 1
+    return {b: chr(c) for b, c in zip(bs, cs)}
+
+
 def export():
     tokenizer = Tokenizer.from_file(str(TOKENIZER_JSON))
+    with open(TOKENIZER_JSON, encoding="utf-8") as f:
+        tok_data = json.load(f)
+
+    vocab = tok_data["model"]["vocab"]
+    merges = tok_data["model"]["merges"]
     vocab_size = 8192
+
+    b2u = bytes_to_unicode()
+    byte_to_token = [vocab[b2u[b]] for b in range(256)]
+
+    # Generate sorted merge table: (pair_key, rank, new_id)
+    merge_entries = []
+    for rank, (p1, p2) in enumerate(merges):
+        id1 = vocab[p1]
+        id2 = vocab[p2]
+        new_id = vocab[p1 + p2]
+        pair_key = (id1 << 16) | id2
+        merge_entries.append((pair_key, rank, new_id))
+
+    merge_entries.sort(key=lambda x: x[0])
+    num_merges = len(merge_entries)
 
     pool = bytearray()
     offsets = [0]
@@ -63,24 +95,35 @@ def export():
                 mask_vi[i // 8] |= (1 << (i % 8))
 
     print(f"Generated string pool: {len(pool)} bytes, {len(offsets)} offsets.")
+    print(f"Generated {num_merges} sorted BPE merges.")
 
     # Write tokenizer_data.h
     OUT_H.write_text(
-        """#pragma once
+        f"""#pragma once
 #include <cstddef>
 #include <cstdint>
 
-namespace ruvi {
-namespace tokenizer_data {
+namespace ruvi {{
+namespace tokenizer_data {{
 
-constexpr uint32_t VOCAB_SIZE = 8192;
+constexpr uint32_t VOCAB_SIZE = {vocab_size};
+constexpr uint32_t NUM_MERGES = {num_merges};
+
+struct MergeEntry {{
+    uint32_t pair_key; // (id1 << 16) | id2
+    uint16_t rank;
+    uint16_t new_id;
+}};
+
 extern const uint32_t TOKEN_OFFSETS[VOCAB_SIZE + 1];
 extern const char STRING_POOL[];
 extern const uint8_t SUBVOCAB_RU_MASK[VOCAB_SIZE / 8];
 extern const uint8_t SUBVOCAB_VI_MASK[VOCAB_SIZE / 8];
+extern const uint16_t BYTE_TO_TOKEN[256];
+extern const MergeEntry MERGE_ENTRIES[NUM_MERGES];
 
-} // namespace tokenizer_data
-} // namespace ruvi
+}} // namespace tokenizer_data
+}} // namespace ruvi
 """,
         encoding="utf-8",
     )
@@ -119,6 +162,19 @@ extern const uint8_t SUBVOCAB_VI_MASK[VOCAB_SIZE / 8];
             chunk = mask_vi[i : i + 16]
             hex_str = ", ".join(f"0x{b:02x}" for b in chunk)
             f.write(f"    {hex_str},\n")
+        f.write("};\n\n")
+
+        # BYTE_TO_TOKEN
+        f.write("const uint16_t BYTE_TO_TOKEN[256] = {\n")
+        for i in range(0, 256, 16):
+            chunk = byte_to_token[i : i + 16]
+            f.write("    " + ", ".join(map(str, chunk)) + ",\n")
+        f.write("};\n\n")
+
+        # MERGE_ENTRIES
+        f.write("const MergeEntry MERGE_ENTRIES[NUM_MERGES] = {\n")
+        for pair_key, rank, new_id in merge_entries:
+            f.write(f"    {{0x{pair_key:08x}u, {rank}, {new_id}}},\n")
         f.write("};\n\n")
 
         f.write("} // namespace tokenizer_data\n} // namespace ruvi\n")

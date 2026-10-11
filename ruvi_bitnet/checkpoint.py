@@ -2,16 +2,21 @@
 
 Torch checkpoints may contain pickled configs; only load trusted files.
 """
+from dataclasses import fields
 import math
 
 import torch
 
-from .model import BitLinear, RuViBitNet10M, RuViConfig
+from .model import BitLinear, Int8Linear, RuViBitNet10M, RuViConfig
 
 
 def checkpoint_config(checkpoint: dict) -> RuViConfig:
     config = checkpoint["config"]
-    return RuViConfig(**config) if isinstance(config, dict) else config
+    if isinstance(config, dict):
+        valid_keys = {f.name for f in fields(RuViConfig)}
+        filtered = {k: v for k, v in config.items() if k in valid_keys}
+        return RuViConfig(**filtered)
+    return config
 
 
 def require_shadow_weights(checkpoint: dict) -> None:
@@ -53,8 +58,8 @@ def load_checkpoint_weights(model: RuViBitNet10M, ckpt: dict):
             base_k = k[:-7]
             shape = state_dict[base_k + "_shape"]
             module_name = base_k.rsplit(".", 1)[0]
-            if not isinstance(modules.get(module_name), BitLinear):
-                raise ValueError(f"Quantized weight does not belong to BitLinear: {base_k}")
+            if not isinstance(modules.get(module_name), (BitLinear, Int8Linear)):
+                raise ValueError(f"Quantized weight does not belong to BitLinear or Int8Linear: {base_k}")
             restored[module_name + ".export_scale"] = state_dict[base_k + "_scale"].float()
 
             num_el = math.prod(shape)
@@ -66,8 +71,8 @@ def load_checkpoint_weights(model: RuViBitNet10M, ckpt: dict):
             restored[base_k] = unpacked.view(shape).float()
         elif k + "_scale" in state_dict:
             module_name = k.rsplit(".", 1)[0]
-            if not isinstance(modules.get(module_name), BitLinear):
-                raise ValueError(f"Quantized weight does not belong to BitLinear: {k}")
+            if not isinstance(modules.get(module_name), (BitLinear, Int8Linear)):
+                raise ValueError(f"Quantized weight does not belong to BitLinear or Int8Linear: {k}")
             restored[module_name + ".export_scale"] = state_dict[k + "_scale"].float()
             restored[k] = v.float()
         else:

@@ -25,4 +25,5 @@ corpus_tokenizer.txt
 *.elf
 *.map
 /build/
+/native/build/
 /dist/

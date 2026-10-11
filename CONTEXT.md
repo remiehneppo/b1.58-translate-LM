@@ -13,8 +13,16 @@ Kỹ thuật dùng chung một ma trận trọng số duy nhất giữa lớp em
 _Avoid_: Untied Head, Separate LM Head
 
 **Grouped-Query Attention (GQA)**:
-Cấu hình attention gom nhóm các query heads chia sẻ chung ít key-value heads hơn (6 Q-heads, 2 KV-heads, head_dim=64), giúp giảm hai phần ba dung lượng KV-cache và băng thông bộ nhớ khi decode.
+Cấu hình attention gom nhóm các query heads chia sẻ chung ít key-value heads hơn (4 Q-heads, 2 KV-heads, head_dim=64), giúp giảm một nửa dung lượng KV-cache và băng thông bộ nhớ khi decode.
 _Avoid_: Full MHA, MQA
+
+**Per-Head QK-Norm**:
+Cơ chế chuẩn hóa RMSNorm độc lập trên từng attention head trước khi tính dot-product, giữ phương sai của mỗi head ở mức 1.0, ngăn chặn hiện tượng attention entropy collapse và head lấn át lẫn nhau.
+_Avoid_: Global Flattened QK-Norm, Unnormalized Attention
+
+**Logit Soft-Capping**:
+Kỹ thuật chặn biên phi tuyến dạng tanh trên attention scores (cap = 50.0) và output logits (cap = 30.0) theo kiến trúc Gemma 2, loại bỏ hiện tượng bùng nổ điểm số chú ý và cắt đứt vòng lặp thoái hóa (degenerative repetition loop) khi sinh câu dài.
+_Avoid_: Unbounded Linear Logits, Extreme Attention Saturation
 
 **Prefix-LM Mask**:
 Mặt nạ attention hỗn hợp cho Decoder-only: áp dụng chú ý 2 chiều (bidirectional) đầy đủ trên các token tiền tố (câu nguồn + mã ngôn ngữ), và áp dụng chú ý nhân quả (causal) tự hồi quy trên các token đích sinh ra.
@@ -25,7 +33,7 @@ Cơ chế nhúng vị trí quay (Rotary Position Embedding) đánh số vị tr�
 _Avoid_: Reset RoPE, ALiBi
 
 **Squared ReLU FFN**:
-Khối Feed-Forward gồm 2 ma trận chiếu tuyến tính BitLinear (intermediate_size = 1280 ở bản 10M) với hàm phi tuyến ReLU^2, loại bỏ hoàn toàn các hàm phi tuyến siêu việt để tối ưu hóa cho phần cứng biên.
+Khối Feed-Forward gồm 2 ma trận chiếu tuyến tính BitLinear (intermediate_size = 1024 ở bản 10M, d_model = 256) với hàm phi tuyến ReLU^2, loại bỏ hoàn toàn các hàm phi tuyến siêu việt để tối ưu hóa cho phần cứng biên.
 _Avoid_: SwiGLU, GELU FFN
 
 **Language Tag**:
@@ -45,7 +53,7 @@ Phương pháp chưng cất tri thức bằng cách cho mô hình giáo viên d�
 _Avoid_: Word-Level Token KL, Cross-Vocab Logit Matching
 
 **Sandwich Precision**:
-Thiết kế kiến trúc giữ nguyên tầng Transformer đầu vào (`layers.0`) và tầng Transformer đầu ra (`layers.{n_layers-1}`; bản 10M là `layers.4`) ở độ chính xác cao (`nn.Linear` FP16/INT8), trong khi các tầng trung gian sử dụng `BitLinear` tam phân 1.58-bit. Thiết kế này bảo toàn entropy thông tin sau embedding và giữ sắc nét phân phối xác suất trước `lm_head`.
+Thiết kế kiến trúc giữ nguyên tầng Transformer đầu vào (`layers.0`) và tầng Transformer đầu ra (`layers.{n_layers-1}`; bản 10M là `layers.10`) ở độ chính xác cao (`nn.Linear` FP16/INT8), trong khi các tầng trung gian sử dụng `BitLinear` tam phân 1.58-bit. Thiết kế này bảo toàn entropy thông tin sau embedding và giữ sắc nét phân phối xác suất trước `lm_head`.
 _Avoid_: Full-Ternary All-Layers, Uniform Quantization
 
 **Offline INT8 Non-Ternary Quantization**:
@@ -65,10 +73,10 @@ Mô hình phân chia tính toán phép nhân ma trận (GEMV/GEMM) trên ESP32-S
 
 ## Relationships
 
-- **BitLinear Attention** thực hiện các phép chiếu Q, K, V, O bằng **BitLinear b1.58** layer trước khi tính ma trận chú ý chuẩn qua Softmax.
-- **Tied Embeddings** liên kết không gian vector đầu vào và đầu ra của mô hình; bản 10M dùng embedding ~3.15M tham số và 5 tầng Transformer.
+- **BitLinear Attention** thực hiện các phép chiếu Q, K, V, O bằng **BitLinear b1.58** layer trước khi tính ma trận chú ý chuẩn qua Softmax với **Per-Head QK-Norm** và **Attention Logit Soft-Capping**.
+- **Tied Embeddings** liên kết không gian vector đầu vào và đầu ra của mô hình; bản 10M dùng embedding ~2.10M tham số và 11 tầng Transformer Deep-and-Thin.
 - **Prefix-LM Mask** kết hợp cùng **Continuous RoPE** cho phép khối Decoder-only hoạt động như Encoder cho câu nguồn (full context) và Decoder cho câu đích (autoregressive) mà không cần thêm kiến trúc cross-attention riêng biệt.
-- **Squared ReLU FFN** kết hợp **GQA** giúp bản gốc đạt 5 tầng với 10.033.792 tham số (d_model=384, d_ff=1280).
+- **Squared ReLU FFN** kết hợp **GQA** giúp bản 10M đạt 11 tầng sâu với 10.037.120 tham số (d_model=256, d_ff=1024, head_dim=64, n_heads=4, n_kv_heads=2).
 
 ## Example dialogue
 
@@ -76,7 +84,7 @@ Mô hình phân chia tính toán phép nhân ma trận (GEMV/GEMM) trên ESP32-S
 > **Domain expert:** "Không, ở quy mô 10M tham số, ma trận attention map phải giữ FP16/INT8 để đảm bảo alignment dịch thuật, chỉ các phép chiếu tuyến tính (Q, K, V, O) mới dùng trọng số ternary."
 >
 > **Dev:** "Tại sao chúng ta phải dùng Tied Embeddings thay vì tách riêng như LLaMA 3?"
-> **Domain expert:** "Với vocab 8k và d_model 384, mỗi ma trận embedding tốn ~3.15M tham số. Dùng Tied Embeddings tránh nhân đôi chi phí này, giữ ngân sách cho 5 tầng Transformer."
+> **Domain expert:** "Với vocab 8k và d_model 256, ma trận embedding tốn ~2.10M tham số. Dùng Tied Embeddings tránh nhân đôi chi phí này, giữ ngân sách cho 11 tầng Transformer (10.037.120 tham số)."
 >
 > **Dev:** "Khi sinh từ trên thiết bị biên, Prefix-LM mask có làm chậm quá trình decode không?"
 > **Domain expert:** "Không, khi decode sinh từng token (step-by-step), token mới chỉ cần attend vào toàn bộ KV-cache đã tính trước đó. Prefix mask chỉ hoạt động ở pha prefill câu nguồn."

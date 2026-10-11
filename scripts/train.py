@@ -16,24 +16,42 @@ from tqdm import tqdm
 from transformers import PreTrainedTokenizerFast
 
 from ruvi_bitnet import RuViBitNet10M, RuViConfig
-from ruvi_bitnet.model import BitLinear
+from ruvi_bitnet.model import BitLinear, Int8Linear
 from ruvi_bitnet.distill import TranslationPrefixDataset, collate_prefix_fn
 
 
+def report_quant_stats(model, weight_quant="ternary"):
+    if weight_quant == "int8":
+        print("[*] Int8Linear Layer Statistics:")
+        for i, layer in enumerate(model.layers):
+            modules = [m for m in layer.modules() if isinstance(m, Int8Linear)]
+            if not modules:
+                continue
+            with torch.no_grad():
+                scales = [m.weight.abs().amax().item() / 127.0 for m in modules]
+                avg_scale = sum(scales) / len(scales)
+                max_val = max(m.weight.abs().amax().item() for m in modules)
+                grads = [m.weight.grad.norm().item() for m in modules if m.weight.grad is not None]
+            grad_str = f", grad_norm={sum(grads) / len(grads):.3g}" if grads else ""
+            print(f"  layer {i:2d}: max_val={max_val:.3f}, avg_scale={avg_scale:.4e}{grad_str}")
+    else:
+        print("[*] BitLinear Layer Statistics:")
+        for i, layer in enumerate(model.layers):
+            modules = [m for m in layer.modules() if isinstance(m, BitLinear)]
+            if not modules:
+                continue
+            with torch.no_grad():
+                ternary = torch.cat([(m.weight / m.weight.abs().mean().clamp(min=1e-5)).round().clamp(-1, 1).flatten() for m in modules])
+                fractions = [(ternary == v).float().mean().item() for v in (-1, 0, 1)]
+                betas = [m.weight.abs().mean().item() for m in modules]
+                avg_beta = sum(betas) / len(betas)
+                grads = [m.weight.grad.norm().item() for m in modules if m.weight.grad is not None]
+            grad_str = f", grad_norm={sum(grads) / len(grads):.3g}" if grads else ""
+            print(f"  layer {i:2d}: -1/0/+1 = {fractions[0]:.2f}/{fractions[1]:.2f}/{fractions[2]:.2f}, avg_scale={avg_beta:.4f}{grad_str}")
+
+
 def report_bitlinear(model):
-    print("[*] BitLinear Layer Statistics:")
-    for i, layer in enumerate(model.layers):
-        modules = [m for m in layer.modules() if isinstance(m, BitLinear)]
-        if not modules:
-            continue
-        with torch.no_grad():
-            ternary = torch.cat([(m.weight / m.weight.abs().mean().clamp(min=1e-5)).round().clamp(-1, 1).flatten() for m in modules])
-            fractions = [(ternary == v).float().mean().item() for v in (-1, 0, 1)]
-            betas = [m.weight.abs().mean().item() for m in modules]
-            avg_beta = sum(betas) / len(betas)
-            grads = [m.weight.grad.norm().item() for m in modules if m.weight.grad is not None]
-        grad_str = f", grad_norm={sum(grads) / len(grads):.3g}" if grads else ""
-        print(f"  layer {i:2d}: -1/0/+1 = {fractions[0]:.2f}/{fractions[1]:.2f}/{fractions[2]:.2f}, avg_scale={avg_beta:.4f}{grad_str}")
+    report_quant_stats(model, "ternary")
 
 
 def save_checkpoint(path, state):
@@ -94,6 +112,7 @@ def train(
     bf16: bool = False,
     variant: str = "base",
     max_seq_len: int = 512,
+    quant: str = "ternary",
 ):
     if epochs <= 0 or batch_size <= 0 or lr <= 0:
         raise ValueError("epochs, batch_size and lr must be positive")
@@ -101,6 +120,8 @@ def train(
         raise ValueError("val_split must be in [0, 1)")
     if not 0 <= warmup_ratio < 1:
         raise ValueError("warmup_ratio must be in [0, 1)")
+    if quant not in ("ternary", "int8"):
+        raise ValueError(f"Unknown quant type: {quant}")
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -109,7 +130,7 @@ def train(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if bf16 and (device.type != "cuda" or not torch.cuda.is_bf16_supported()):
         raise RuntimeError("BF16 training requires a BF16-capable CUDA GPU")
-    print(f"[*] Training on device: {device} | Seed: {seed}")
+    print(f"[*] Training on device: {device} | Seed: {seed} | Quant: {quant.upper()}")
 
     # 1. Load Tokenizer & Config
     if not os.path.exists(tokenizer_dir):
@@ -118,7 +139,7 @@ def train(
     tokenizer = PreTrainedTokenizerFast.from_pretrained(tokenizer_dir)
     variants = {
         "base": {},
-        "wide": dict(d_model=768, d_ff=2560, n_heads=12, n_kv_heads=4),
+        "wide": dict(d_model=512, d_ff=2048, n_heads=8, n_kv_heads=2),
         "deep": dict(n_layers=22),
     }
     if variant not in variants:
@@ -135,7 +156,10 @@ def train(
         max_seq_len=max_seq_len,
         dropout=dropout,
         label_smoothing=label_smoothing,
+        quantize_first_layer=quant == "int8",
+        quantize_last_layer=quant == "int8",
         quantize_hidden_layers=not bf16,
+        weight_quant=quant,
         pad_token_id=tokenizer.pad_token_id,
         bos_token_id=tokenizer.bos_token_id,
         eos_token_id=tokenizer.eos_token_id,
@@ -189,7 +213,12 @@ def train(
         saved_cfg = state["config"]
         if isinstance(saved_cfg, dict):
             saved_cfg = RuViConfig(**saved_cfg)
-        for attr in ("vocab_size", "d_model", "n_layers", "n_heads", "n_kv_heads", "head_dim", "d_ff", "quantize_first_layer", "quantize_last_layer", "quantize_hidden_layers", "max_seq_len", "rope_theta", "eps", "dropout", "label_smoothing"):
+        for attr in (
+            "vocab_size", "d_model", "n_layers", "n_heads", "n_kv_heads", "head_dim", "d_ff",
+            "quantize_first_layer", "quantize_last_layer", "quantize_hidden_layers", "max_seq_len",
+            "rope_theta", "eps", "dropout", "label_smoothing", "attn_logit_softcapping", "final_logit_softcapping",
+            "weight_quant",
+        ):
             if getattr(saved_cfg, attr) != getattr(cfg, attr):
                 raise ValueError(f"Resume config mismatch for {attr}: saved {getattr(saved_cfg, attr)} vs current {getattr(cfg, attr)}")
         model.load_state_dict(state["model_state_dict"])
@@ -212,8 +241,8 @@ def train(
     os.makedirs(os.path.dirname(os.path.abspath(save_file)), exist_ok=True)
 
     if report_stats and start_epoch == 1:
-        print("[*] Initial BitLinear Statistics:")
-        report_bitlinear(model)
+        print(f"[*] Initial {cfg.weight_quant.upper()} Quantized Layer Statistics:")
+        report_quant_stats(model, cfg.weight_quant)
 
     for epoch in range(start_epoch, epochs + 1):
         model.train()
@@ -289,7 +318,7 @@ def train(
         save_checkpoint(last_file, ckpt_state)
 
         if report_stats:
-            report_bitlinear(model)
+            report_quant_stats(model, cfg.weight_quant)
 
     print(f"[+] Training complete. Best checkpoint: {save_file} (best_val_loss: {best_val_loss:.4f}) | Latest: {last_file}")
 
@@ -310,16 +339,18 @@ if __name__ == "__main__":
     parser.add_argument("--warmup_ratio", type=float, default=0.05)
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--max_seq_len", type=int, default=512, help="Hard limit for forward and prompt plus generated tokens")
+    parser.add_argument("--quant", choices=("ternary", "int8"), default="ternary",
+                        help="Loại lượng tử hóa: ternary (BitLinear 1.58-bit) hoặc int8 (Int8Linear 8-bit QAT)")
     parser.add_argument("--no_report_bitlinear", action="store_true", help="Tắt hiển thị thống kê BitLinear theo tầng")
     parser.add_argument("--bf16", action="store_true", help="Huấn luyện baseline nn.Linear với CUDA BF16 autocast (FP32 master weights)")
     parser.add_argument("--variant", choices=("base", "wide", "deep"), default="base",
-                        help="base: 384 × 5 (~10M); wide: 768 × 5; deep: 384 × 22 (~33-34M)")
+                        help="base: 256 × 11 (~10.04M Deep-and-Thin); wide: 512 × 11; deep: 256 × 22 (~18M)")
     args = parser.parse_args()
 
     train(
         args.data,
         args.tokenizer,
-        args.output or f"ruvi_{args.variant}{'_bf16' if args.bf16 else ''}_checkpoint.pt",
+        args.output or f"ruvi_{args.variant}_{args.quant}{'_bf16' if args.bf16 else ''}_checkpoint.pt",
         args.epochs,
         args.batch_size,
         args.lr,
@@ -334,4 +365,5 @@ if __name__ == "__main__":
         bf16=args.bf16,
         variant=args.variant,
         max_seq_len=args.max_seq_len,
+        quant=args.quant,
     )

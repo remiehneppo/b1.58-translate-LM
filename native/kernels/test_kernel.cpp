@@ -65,6 +65,12 @@ static void exercise(size_t k, size_t m, size_t n, size_t tile, int extreme, std
         CHECK(run(p, o, scratch) == Status::ok);
         CHECK(y == reference);
     }
+    if (rv1103_neon_available()) {
+        std::fill(y.begin(), y.end(), 12345);
+        o.n_begin = 0; o.backend = Backend::rv1103_neon;
+        CHECK(run(p, o, scratch) == Status::ok);
+        CHECK(y == reference);
+    }
     // Also cover the aligned direct-input path, without optional microcopy.
     std::vector<int8_t> direct_storage(m * pk + 16);
     int8_t* direct = align16(direct_storage);
@@ -78,6 +84,8 @@ static void exercise(size_t k, size_t m, size_t n, size_t tile, int extreme, std
     CHECK(y == reference);
     o.backend = Backend::esp32_s3;
     CHECK(run(p, o, direct_scratch) == (esp32_s3_available() ? Status::ok : Status::unsupported));
+    o.backend = Backend::rv1103_neon;
+    CHECK(run(p, o, direct_scratch) == (rv1103_neon_available() ? Status::ok : Status::unsupported));
     p.input = original_input; p.input_stride = xs; p.input_bytes = m * xs;
     o = Options{}; o.tile_rows = tile;
     std::fill(y.begin(), y.end(), 12345);
@@ -129,5 +137,10 @@ int main() {
     CHECK(dot_s3_aligned(a, b, 32784, &result) == Status::invalid_argument);
     CHECK(result == 7);
     CHECK(dot_s3_aligned(a, b, 16, &result) == (esp32_s3_available() ? Status::ok : Status::unsupported));
-    std::printf("PASS: %zu reference cases, tile rows 8/16/32, validation and S3 guard checks\n", cases);
+    CHECK(dot_rv1103_aligned(a + 1, b, 16, &result) == Status::invalid_argument);
+    CHECK(dot_rv1103_aligned(a, b, 15, &result) == Status::invalid_argument);
+    CHECK(dot_rv1103_aligned(a, b, 32784, &result) == Status::invalid_argument);
+    CHECK(result == 7);
+    CHECK(dot_rv1103_aligned(a, b, 16, &result) == (rv1103_neon_available() ? Status::ok : Status::unsupported));
+    std::printf("PASS: %zu reference cases, tile rows 8/16/32, validation, S3 and RV1103 guard checks\n", cases);
 }

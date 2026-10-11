@@ -8,7 +8,7 @@ namespace ruvi {
 namespace kernels {
 
 enum class Status { ok, invalid_argument, insufficient_scratch, invalid_weight, unsupported };
-enum class Backend { portable, automatic, esp32_s3 };
+enum class Backend { portable, automatic, esp32_s3, rv1103_neon };
 
 // RUVI0001 weight payload (not the file header): two low-to-high bits per
 // element, continuous index n*K+k. 00=-1, 01=0, 10=1; 11 is invalid.
@@ -46,18 +46,23 @@ struct Scratch {
 size_t padded_k(size_t k);
 size_t weight_scratch_bytes(size_t k, size_t tile_rows);
 bool esp32_s3_available();
+bool rv1103_neon_available();
 
 // No allocations. Distinct N partitions may execute concurrently with distinct
 // scratch and disjoint output columns. Input/weights/multipliers are read-only.
 // Buffers must not overlap writable output or scratch. Multipliers must be
 // finite and >0; scale finite. Padding input values are ignored (weights zero).
 // Validation failures occur before any output writes. An optional input_copy
-// allows S3 with unaligned input bases/strides; otherwise S3 requires align16.
+// allows S3/RV1103 with unaligned input bases/strides; otherwise align16 is required.
 Status run(const Problem& problem, const Options& options, const Scratch& scratch);
 
 // Checked EE signed-int8 dot primitive. Both buffers must be aligned to 16 and
 // length a multiple of 16 in [16,32768]. No hardware access on invalid arguments.
 Status dot_s3_aligned(const int8_t* a, const int8_t* b, size_t length, int32_t* result);
+
+// Checked ARMv7-A NEON signed-int8 dot primitive for Rockchip RV1103 (Cortex-A7).
+// Both buffers must be aligned to 16 and length a multiple of 16 in [16,32768].
+Status dot_rv1103_aligned(const int8_t* a, const int8_t* b, size_t length, int32_t* result);
 
 } // namespace kernels
 } // namespace ruvi

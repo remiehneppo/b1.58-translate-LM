@@ -48,6 +48,9 @@ bool Model::load(const void* image, size_t size) {
         &cfg_.head_dim, &cfg_.ff, &cfg_.max_context, &cfg_.eos, &cfg_.pad, &cfg_.tag_ru, &cfg_.tag_vi};
     for (size_t i = 0; i < 12; ++i) *fields[i] = u32(data + 8 + 4 * i);
     cfg_.theta = f32(data + 56); cfg_.eps = f32(data + 60);
+    cfg_.attn_softcap = f32(data + 72); cfg_.final_softcap = f32(data + 76);
+    if (!std::isfinite(cfg_.attn_softcap) || cfg_.attn_softcap < 0.0f) cfg_.attn_softcap = 0.0f;
+    if (!std::isfinite(cfg_.final_softcap) || cfg_.final_softcap < 0.0f) cfg_.final_softcap = 0.0f;
     size_t length = u32(data + 64);
     if (length < 80 || length > size) return fail("truncated native image");
     if (!cfg_.vocab || cfg_.vocab > 65536 || !cfg_.dim || cfg_.dim > 32768
@@ -116,6 +119,8 @@ void Model::set_options(const KernelOptions& options) {
         effective_backend_ = Backend::Scalar;
     } else if (options_.backend == Backend::S3) {
         effective_backend_ = kernels::esp32_s3_available() ? Backend::S3 : Backend::Tiled;
+    } else if (options_.backend == Backend::RV1103) {
+        effective_backend_ = kernels::rv1103_neon_available() ? Backend::RV1103 : Backend::Tiled;
     } else {
         effective_backend_ = Backend::Tiled;
     }
@@ -208,6 +213,17 @@ void Model::rms(const float* input, float* output, const Tensor& weight) {
     for (uint32_t i = 0; i < weight.cols; ++i) output[i] = input[i] * inverse * weight.value(i);
 }
 
+void Model::rms_heads(const float* input, float* output, const Tensor& weight, uint32_t heads, uint32_t head_dim) {
+    for (uint32_t h = 0; h < heads; ++h) {
+        float sum = 0;
+        const float* in_h = input + h * head_dim;
+        float* out_h = output + h * head_dim;
+        for (uint32_t d = 0; d < head_dim; ++d) sum += in_h[d] * in_h[d];
+        const float inverse = 1.0f / std::sqrt(sum / head_dim + cfg_.eps);
+        for (uint32_t d = 0; d < head_dim; ++d) out_h[d] = in_h[d] * inverse * weight.value(h * head_dim + d);
+    }
+}
+
 void Model::quantize_row(const float* input, uint32_t cols, int8_t* out, float& multiplier) {
     float maximum = 1e-5f;
     for (uint32_t i = 0; i < cols; ++i) {
@@ -249,7 +265,9 @@ void Model::linear_ternary(const Tensor& weight, const int8_t* input_quant, floa
 
         kernels::Options opts;
         opts.tile_rows = options_.tile_rows;
-        opts.backend = (effective_backend_ == Backend::S3) ? kernels::Backend::esp32_s3 : kernels::Backend::portable;
+        opts.backend = (effective_backend_ == Backend::S3) ? kernels::Backend::esp32_s3 :
+                       (effective_backend_ == Backend::RV1103) ? kernels::Backend::rv1103_neon :
+                       kernels::Backend::portable;
 
         if (options_.cores > 1 && tile_scratch_[1] && weight.rows >= 32) {
             struct ParallelTernaryJob {
@@ -379,6 +397,7 @@ struct Int8Job {
     uint32_t parts;
     const uint8_t* mask;
     bool use_s3;
+    bool use_rv1103;
 };
 
 void linear_int8_part(void* arg, uint32_t part) {
@@ -397,7 +416,9 @@ void linear_int8_part(void* arg, uint32_t part) {
         }
         const int8_t* w_row = w_base + size_t(r) * cols;
         int32_t sum = 0;
-        if (j->use_s3) {
+        if (j->use_rv1103) {
+            kernels::dot_rv1103_aligned(j->input_quant, w_row, cols, &sum);
+        } else if (j->use_s3) {
             kernels::dot_s3_aligned(j->input_quant, w_row, cols, &sum);
         } else {
             for (uint32_t c = 0; c < cols; ++c) {
@@ -433,7 +454,8 @@ void Model::linear_int8(const Tensor& weight, const int8_t* input_quant, float m
     const float factor = weight.scale / multiplier;
     const uint32_t parts = (options_.cores > 1 && weight.rows >= 64) ? 2 : 1;
     const bool use_s3 = (effective_backend_ == Backend::S3 && (weight.cols % 16 == 0));
-    Int8Job job{&weight, input_quant, factor, output, weight.rows, weight.cols, parts, subvocab_mask, use_s3};
+    const bool use_rv1103 = (effective_backend_ == Backend::RV1103 && (weight.cols % 16 == 0));
+    Int8Job job{&weight, input_quant, factor, output, weight.rows, weight.cols, parts, subvocab_mask, use_s3, use_rv1103};
     parallel_run(linear_int8_part, &job, parts);
 }
 
@@ -487,11 +509,11 @@ void Model::keys(const Layer& layer, uint32_t index, const float* input, uint32_
         float multiplier = 1.0f;
         quantize_row(normed_, cfg_.dim, quantized_, multiplier);
         linear_ternary(layer.k, quantized_, multiplier, k);
-        rms(k, k, layer.k_norm);
+        rms_heads(k, k, layer.k_norm, cfg_.kv_heads, cfg_.head_dim);
         rope(k, cfg_.kv_heads, position);
         linear_ternary(layer.v, quantized_, multiplier, v);
     } else {
-        linear(layer.k, normed_, k); rms(k, k, layer.k_norm);
+        linear(layer.k, normed_, k); rms_heads(k, k, layer.k_norm, cfg_.kv_heads, cfg_.head_dim);
         rope(k, cfg_.kv_heads, position); linear(layer.v, normed_, v);
     }
 }
@@ -507,7 +529,7 @@ void Model::block(const Layer& layer, uint32_t index, float* hidden, uint32_t po
     } else {
         linear(layer.q, normed_, q_);
     }
-    rms(q_, q_, layer.q_norm);
+    rms_heads(q_, q_, layer.q_norm, cfg_.heads, cfg_.head_dim);
     rope(q_, cfg_.heads, position);
 
     const float factor = 1.0f / std::sqrt(float(cfg_.head_dim));
@@ -518,7 +540,9 @@ void Model::block(const Layer& layer, uint32_t index, float* hidden, uint32_t po
         for (uint32_t t = 0; t < attend_count; ++t) {
             float dot = 0; const float* key = k + t * kd + kh * cfg_.head_dim;
             for (uint32_t d = 0; d < cfg_.head_dim; ++d) dot += query[d] * key[d];
-            scores_[t] = dot * factor; maximum = std::max(maximum, scores_[t]);
+            float score = dot * factor;
+            if (cfg_.attn_softcap > 0.0f) score = cfg_.attn_softcap * std::tanh(score / cfg_.attn_softcap);
+            scores_[t] = score; maximum = std::max(maximum, scores_[t]);
         }
         float total = 0;
         for (uint32_t t = 0; t < attend_count; ++t) { scores_[t] = std::exp(scores_[t] - maximum); total += scores_[t]; }
@@ -561,6 +585,13 @@ bool Model::output(const float* hidden) {
         if (mask) {
             for (uint32_t i = 0; i < cfg_.vocab; ++i) {
                 if (!((mask[i >> 3] >> (i & 7)) & 1)) logits_[i] = -1e9f;
+            }
+        }
+    }
+    if (cfg_.final_softcap > 0.0f) {
+        for (uint32_t i = 0; i < cfg_.vocab; ++i) {
+            if (logits_[i] > -1e8f) {
+                logits_[i] = cfg_.final_softcap * std::tanh(logits_[i] / cfg_.final_softcap);
             }
         }
     }
@@ -612,9 +643,9 @@ bool Model::decode(uint32_t token) {
             linear(layer.v, normed_, v);
             linear(layer.q, normed_, q_);
         }
-        rms(k, k, layer.k_norm);
+        rms_heads(k, k, layer.k_norm, cfg_.kv_heads, cfg_.head_dim);
         rope(k, cfg_.kv_heads, position_);
-        rms(q_, q_, layer.q_norm);
+        rms_heads(q_, q_, layer.q_norm, cfg_.heads, cfg_.head_dim);
         rope(q_, cfg_.heads, position_);
 
         const float factor = 1.0f / std::sqrt(float(cfg_.head_dim));
@@ -629,7 +660,9 @@ bool Model::decode(uint32_t token) {
             for (uint32_t t = 0; t < attend_count; ++t) {
                 float dot = 0; const float* key = k_base + t * kd + kh * cfg_.head_dim;
                 for (uint32_t d = 0; d < cfg_.head_dim; ++d) dot += query[d] * key[d];
-                scores_[t] = dot * factor; maximum = std::max(maximum, scores_[t]);
+                float score = dot * factor;
+                if (cfg_.attn_softcap > 0.0f) score = cfg_.attn_softcap * std::tanh(score / cfg_.attn_softcap);
+                scores_[t] = score; maximum = std::max(maximum, scores_[t]);
             }
             float total = 0;
             for (uint32_t t = 0; t < attend_count; ++t) { scores_[t] = std::exp(scores_[t] - maximum); total += scores_[t]; }

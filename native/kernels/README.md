@@ -16,7 +16,10 @@ https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_r
   (weight_scale / multipliers[token*multiplier_stride])`.
 - `bool esp32_s3_available()` reports compile-time S3 support.
 - `Status dot_s3_aligned(const int8_t*, const int8_t*, size_t, int32_t*)`
-  checks alignment and size before calling the private assembly leaf.
+  checks alignment and size before calling the private S3 assembly leaf.
+- `bool rv1103_neon_available()` reports compile-time ARM NEON support for RV1103.
+- `Status dot_rv1103_aligned(const int8_t*, const int8_t*, size_t, int32_t*)`
+  checks alignment and size before calling the private ARM NEON assembly leaf.
 
 `Problem.weights` points at the RUVI0001 **payload**, not a file header. Element
 `n*k+j` uses the low-to-high two-bit pair in byte `index/4`; rows have no byte
@@ -45,13 +48,13 @@ accumulation bound for ternary weights is 32768*128 = 4194304.
 
 ```sh
 g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
-  native/kernels/kernel.cpp native/kernels/kernel_s3.cpp \
+  native/kernels/kernel.cpp native/kernels/kernel_s3.cpp native/kernels/kernel_rv1103.cpp \
   native/kernels/test_kernel.cpp -o /tmp/ruvi-test-kernel
 /tmp/ruvi-test-kernel
 
 g++ -std=c++17 -O1 -g -Wall -Wextra -Werror \
   -fsanitize=address,undefined -fno-omit-frame-pointer \
-  native/kernels/kernel.cpp native/kernels/kernel_s3.cpp \
+  native/kernels/kernel.cpp native/kernels/kernel_s3.cpp native/kernels/kernel_rv1103.cpp \
   native/kernels/test_kernel.cpp -o /tmp/ruvi-test-kernel-asan
 /tmp/ruvi-test-kernel-asan
 ```
@@ -74,3 +77,12 @@ firmware must preserve PIE state when preempting the kernel with another PIE
 user. There are no firmware/build-system changes in this directory addition.
 Host tests do not assemble or execute the S3 instructions; S3 cross-build and
 hardware execution remain required to validate that path.
+
+## Luckfox Pico RV1103 (ARM Cortex-A7 NEON) compilation
+
+Compile `kernel.cpp`, `kernel_rv1103.cpp`, and `kernel_rv1103.S` with the ARM
+toolchain (`arm-rockchip830-linux-uclibcgnueabihf-g++` hoặc `arm-linux-gnueabihf-g++`).
+Kích hoạt các cờ tối ưu hóa: `-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -O3`.
+Leaf `.S` sử dụng AAPCS standard với zero stack overhead, các thanh ghi sử dụng hoàn toàn
+thuộc tập caller-saved (`r0-r3, r12` và `d0-d7, d16-d31`), tính toán luân phiên giữa
+2 vector accumulator 32-bit (`q3` và `q8`) để triệt tiêu độ trễ đường ống của Cortex-A7.
